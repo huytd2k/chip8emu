@@ -116,7 +116,7 @@ impl Chip8Interpreter {
                 let n = take_param_n(opcode);
                 let x_cor = self.registers_v[x as usize] & 63;
                 let y_cor = self.registers_v[y as usize] & 31;
-                self.registers_v[15] = 0;
+                self.registers_v[0xF] = 0;
             }
         }
     }
@@ -140,6 +140,26 @@ fn take_param_x(opcode: u16) -> u8 {
 
 fn take_param_y(opcode: u16) -> u8 {
     ((opcode & 0x00F0) >> 4) as u8
+}
+
+fn display(pixels: &mut [[u8; 64]; 32], mem: Mem, i: u16, x_cor: u16, y_cor: u16, n: u16) -> bool {
+    let mut ret = false;
+    for row in 0..n {
+        let mut sprite = mem[(i + row) as usize];
+        for x in 1..8{
+            if sprite & 0x80 > 0 {
+                let to_y = (y_cor + row) as usize;
+                let to_x = (x_cor + x) as usize;
+                if to_x < 32 && to_y < 64 {
+                    pixels[(y_cor + row) as usize][(x_cor + x) as usize] = 1;
+                    ret = true;
+                }
+            }
+            sprite >>= 1;
+        }
+    }
+
+    ret
 }
 
 #[cfg(test)]
@@ -196,8 +216,10 @@ mod tests {
     // #[ignore]
     fn test_cpu_display() {
         let mut cpu = Chip8Interpreter::new();
-        cpu.pixels = [[1; 64]; 32];
-        cpu.pixels[1][1] = 0;
+        // let sprite = [[1, 1, 1, 1, 0, 0, 0, 0]];
+        cpu.mem[0] = 0b1111;
+        cpu.pixels = [[0; 64]; 32];
+        display(&mut cpu.pixels, cpu.mem, 0, 0, 0, 3);
         cpu.display();
     }
 }
