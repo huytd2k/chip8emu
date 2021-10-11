@@ -1,4 +1,4 @@
-pub struct Cpu {
+pub struct Chip8Interpreter {
     registers_v: [u16; 16],
     registers_i: [u16; 2],
     delay_timer: u8,
@@ -18,9 +18,9 @@ enum Instruction {
 }
 type Mem = [u8; 4096];
 
-impl Cpu {
-    fn new() -> Cpu {
-        Cpu {
+impl Chip8Interpreter {
+    pub fn new() -> Chip8Interpreter {
+        Chip8Interpreter {
             registers_v: [0; 16],
             registers_i: [0; 2],
             delay_timer: 0,
@@ -39,6 +39,17 @@ impl Cpu {
         for (idx, &byte) in file.iter().enumerate() {
             self.mem[idx] = byte;
         }
+    }
+
+    pub fn run_rom(&mut self, path: &str) {
+        self.load_rom(path);
+        loop {
+            self.exec();
+        }
+    }
+
+    fn exec(&mut self) {
+        panic!("Not implemented!");
     }
 
     fn fetch(&mut self, addr: u16) -> u16{
@@ -102,51 +113,13 @@ impl Cpu {
                 let sprite_tall = self.take_mem_at_vi();
                 let x = take_param_x(opcode);
                 let y = take_param_y(opcode);
-                let x_cor = self.registers_v[x as usize];
-                let y_cor = self.registers_v[y as usize];
+                let n = take_param_n(opcode);
+                let x_cor = self.registers_v[x as usize] & 63;
+                let y_cor = self.registers_v[y as usize] & 31;
+                self.registers_v[15] = 0;
             }
         }
     }
-}
-
-
-pub struct Input {}
-impl Input {
-    pub fn new() -> Input {
-        Input {}
-    }
-}
-
-pub struct Graphic {
-    pixels: [[u8; 64]; 32],
-}
-
-impl Graphic {
-    pub fn new() -> Graphic {
-        Graphic {
-            pixels: [[0; 64]; 32],
-        }
-    }
-}
-
-pub struct Chip8 {
-    cpu: Cpu,
-    input: Input,
-    graphic: Graphic,
-}
-
-pub struct Timer {}
-
-impl Chip8 {
-    pub fn new() -> Chip8 {
-        Chip8 {
-            cpu: Cpu::new(),
-            input: Input::new(),
-            graphic: Graphic::new(),
-        }
-    }
-
-    // pub fn load_rom()
 }
 
 fn take_param_n(opcode: u16) -> u8 {
@@ -205,7 +178,7 @@ mod tests {
 
     #[test]
     fn test_cpu_fetch() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Chip8Interpreter::new();
         cpu.mem[0] = 0xAB;
         cpu.mem[1] = 0xBC;
         assert_eq!(cpu.fetch(0), 0xABBC);
@@ -214,7 +187,7 @@ mod tests {
 
     #[test]
     fn test_cpu_load() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Chip8Interpreter::new();
         cpu.load_rom("tests/resource/0xABBC.txt");
         assert_eq!(cpu.fetch(0), 0xABBC);
     }
@@ -222,7 +195,7 @@ mod tests {
     #[test]
     // #[ignore]
     fn test_cpu_display() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Chip8Interpreter::new();
         cpu.pixels = [[1; 64]; 32];
         cpu.pixels[1][1] = 0;
         cpu.display();
