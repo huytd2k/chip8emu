@@ -8,6 +8,7 @@ pub struct Chip8Interpreter {
     pixels: [[u8; 64]; 32],
 }
 
+#[derive(Debug)]
 enum Instruction {
     End(u16),
     Clear(u16),
@@ -17,6 +18,7 @@ enum Instruction {
     Seri(u16),
     Draw(u16),
 }
+
 type Mem = [u8; 4096];
 
 impl Chip8Interpreter {
@@ -94,7 +96,7 @@ impl Chip8Interpreter {
     }
     
     fn decode(&self, opcode: u16) -> Instruction{
-        if opcode == 0 {
+        if opcode == 0x00 {
             // std::process::exit(0);
             return Instruction::End(opcode);
         }
@@ -128,7 +130,7 @@ impl Chip8Interpreter {
                 self.pixels = [[0; 64]; 32];
             }
             Instruction::Jump(opcode) => {
-                self.register_pc = take_param_nnn(opcode)
+                self.register_pc = take_param_nnn(opcode);
             }
             Instruction::Sevx(opcode) => {
                 let x = take_param_x(opcode);
@@ -150,12 +152,9 @@ impl Chip8Interpreter {
                 let n = take_param_n(opcode);
                 let x_cor = self.registers_v[x as usize] & 63;
                 let y_cor = self.registers_v[y as usize] & 31;
-                println!("x,y {}, {}", x_cor, y_cor);
-                println!("mem {:#04x}", self.registers_i[0] as usize);
-                println!("at {}", self.mem[self.registers_i[0] as usize]);
                 self.registers_v[0xF] = 0;
                 self.registers_v[0xF] = display(&mut self.pixels, self.mem, self.registers_i[0], x_cor, y_cor, n as u16);
-                self.display();
+                // self.display();
             }
         }
     }
@@ -187,12 +186,13 @@ fn display(pixels: &mut [[u8; 64]; 32], mem: Mem, i: u16, x_cor: u16, y_cor: u16
         let mut sprite = mem[(i + row) as usize];
         for x in 0..8{
             if sprite >> 7 > 0 {
-                let to_y = (y_cor + row) as usize;
-                let to_x = (x_cor + x) as usize;
-                if to_x < 64 && to_y < 32 {
-                    pixels[to_y][to_x] ^= 1;
+                let to_y = ((y_cor + row) & 31) as usize;
+                let to_x = ((x_cor + x) & 63) as usize;
+                let old = pixels[to_y][to_x];
+                pixels[to_y][to_x] ^= 1;
+                if old != pixels[to_y][to_x] {
                     ret = 1;
-                }
+                } 
             }
             sprite <<= 1;
         }
@@ -252,22 +252,17 @@ mod tests {
     }
 
     #[test]
-    // #[ignore]
-    fn test_cpu_display() {
+    fn test_display() {
         let mut cpu = Chip8Interpreter::new();
-        cpu.mem[0] = 0b11111111;
-        cpu.mem[1] = 0b01111111;
+        cpu.mem[0] = 0b11111000;
+        cpu.mem[1] = 0;
         cpu.pixels = [[1; 64]; 32];
         assert_eq!(display(&mut cpu.pixels, cpu.mem, 0, 63, 31, 1), 1);
-        cpu.display();
         assert_eq!(display(&mut cpu.pixels, cpu.mem, 1, 63, 31, 1), 0);
-        cpu.display();
-    }
-
-    #[test]
-    fn test_ibm_logo() {
-        let mut cpu = Chip8Interpreter::new();
-        cpu.run_rom("ibmrom.ch8");
-        cpu.display();
+        assert_eq!(cpu.pixels[31][63], 0);
+        assert_eq!(cpu.pixels[31][0], 0);
+        assert_eq!(cpu.pixels[31][1], 0);
+        assert_eq!(cpu.pixels[31][2], 0);
+        assert_eq!(cpu.pixels[31][3], 0);
     }
 }
