@@ -1,3 +1,5 @@
+use crate::chip8::opcode::Opcode;
+
 // Declare specification in constant
 const MEMORY_SIZE: u16 = 4096;
 // In Chip-8, the memory from address 0x00 -> 0x199 is preserved
@@ -22,8 +24,9 @@ const FONTS_DATA: [u8; 80] = [
     0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
     0xF0, 0x80, 0xF0, 0x80, 0x80, // F
 ];
-
 /**************************************/
+mod opcode;
+
 pub struct Chip8Interpreter {
     registers_v: [u8; 16],
     register_i: u16,
@@ -59,34 +62,6 @@ enum Instruction {
     IANNN(Opcode),
     /// Draw
     IDXYN(Opcode),
-}
-
-#[derive(Debug)]
-struct Opcode {
-    raw: u16,
-    x: u8,
-    y: u8,
-    n: u8,
-    nnn: u16,
-    kk: u8,
-}
-
-impl Opcode {
-    fn new(raw: u16) -> Opcode {
-        let x = take_param_x(raw);
-        let y = take_param_y(raw);
-        let n = take_param_n(raw);
-        let nnn = take_param_nnn(raw);
-        let kk = take_param_kk(raw);
-
-        Opcode {raw, x, y, n, nnn, kk}
-    }
-}
-
-impl PartialEq<u16> for Opcode {
-    fn eq(&self, raw: &u16) -> bool {
-        self.raw == *raw
-    }
 }
 
 
@@ -226,26 +201,6 @@ impl Chip8Interpreter {
     }
 }
 
-fn take_param_n(opcode: u16) -> u8 {
-    (opcode & 0x000F) as u8
-}
-
-fn take_param_nnn(opcode: u16) -> u16 {
-    opcode & 0x0FFF
-}
-
-fn take_param_kk(opcode: u16) -> u8 {
-    (opcode & 0x00FF) as u8
-}
-
-fn take_param_x(opcode: u16) -> u8 {
-    ((opcode & 0x0F00) >> 8) as u8
-}
-
-fn take_param_y(opcode: u16) -> u8 {
-    ((opcode & 0x00F0) >> 4) as u8
-}
-
 fn display(pixels: &mut [[u8; FRAME_BUFFER_WIDTH]; FRAME_BUFFER_HEIGHT], mem: Mem, i: u16, x_cor: u8, y_cor: u8, n: u8) -> u8 {
     let mut ret = 0;
     for row in 0..n {
@@ -270,37 +225,6 @@ fn display(pixels: &mut [[u8; FRAME_BUFFER_WIDTH]; FRAME_BUFFER_HEIGHT], mem: Me
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_take_param_n() {
-        assert_eq!(take_param_n(0x8C74), 0x04);
-        assert_eq!(take_param_n(0x8B74), 0x04);
-    }
-
-    #[test]
-    fn test_take_param_nnn() {
-        assert_eq!(take_param_nnn(0x8C74), 0x0C74);
-        assert_eq!(take_param_nnn(0xAB12), 0x0B12);
-    }
-
-    #[test]
-    fn test_take_param_kk() {
-        assert_eq!(take_param_kk(0x8C74), 0x74);
-        assert_eq!(take_param_kk(0xAB12), 0x12);
-    }
-
-    #[test]
-    fn test_take_param_x() {
-        assert_eq!(take_param_x(0x8C74), 0x0C);
-        assert_eq!(take_param_x(0xAB12), 0x0B);
-    }
-
-    #[test]
-    fn test_take_param_y() {
-        assert_eq!(take_param_y(0x8C74), 0x07);
-        assert_eq!(take_param_y(0xAB12), 0x01);
-    }
-
     #[test]
     fn test_cpu_fetch() {
         let mut cpu = Chip8Interpreter::new();
