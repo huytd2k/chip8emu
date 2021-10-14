@@ -52,11 +52,15 @@ enum Instruction {
     I2NNN(Opcode),
     /// Skip next instruction if x = nn
     I3XNN(Opcode),
+    /// Skip next instruction if x != nn
+    I4XNN(Opcode),
+    /// Skip next instruction if x == y
+    I5XY0(Opcode),
     /// Set v[x] = nn
     I6XNN(Opcode),
     /// Add nn to v[x] ~ v[x] += nn
     I7XNN(Opcode),
-    /// Add nn to v[x] ~ v[x] += nn
+    /// Skip next instruction if x != y
     I9XY0(Opcode),
     /// Set vi = nnn
     IANNN(Opcode),
@@ -145,6 +149,12 @@ impl Chip8Interpreter {
         if raw_opcode >> 12 == 0x3 {
             return Instruction::I3XNN(opcode);
         }
+        if raw_opcode >> 12 == 0x4 {
+            return Instruction::I4XNN(opcode);
+        }
+        if raw_opcode >> 12 == 0x5 {
+            return Instruction::I5XY0(opcode);
+        }
         if raw_opcode >> 12 == 0x6 {
             return Instruction::I6XNN(opcode);
         }
@@ -169,6 +179,10 @@ impl Chip8Interpreter {
             }
             Instruction::I00E0(_) => {
                 self.frame_buffer = [[0; FRAME_BUFFER_WIDTH]; FRAME_BUFFER_HEIGHT];
+            }   
+            Instruction::I00EE(_) => {
+                // NOTE: error handling
+                self.register_pc = self.stack.pop().unwrap();
             }
             Instruction::I1NNN(opcode) => {
                 self.register_pc = opcode.nnn;
@@ -177,8 +191,25 @@ impl Chip8Interpreter {
                 self.stack.push(self.register_pc);
                 self.register_pc = opcode.nnn;
             }
-            Instruction::I3XNN(_) => {
-                panic!("Not implemented");
+            Instruction::I3XNN(opcode) => {
+                if opcode.x == opcode.kk {
+                    self.register_pc += 2;
+                }
+            }
+            Instruction::I4XNN(opcode) => {
+                if opcode.x != opcode.kk {
+                    self.register_pc += 2;
+                }
+            }
+            Instruction::I5XY0(opcode) => {
+                if opcode.x == opcode.y {
+                    self.register_pc += 2;
+                }
+            }
+            Instruction::I9XY0(opcode) => {
+                if opcode.x != opcode.y {
+                    self.register_pc += 2;
+                }
             }
             Instruction::I6XNN(opcode) => {
                 self.registers_v[opcode.x as usize] = opcode.kk;
