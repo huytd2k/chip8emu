@@ -1,3 +1,11 @@
+// Declare specification in constant
+const MEMORY_SIZE: u16 = 4096;
+// In Chip-8, the memory from address 0x00 -> 0x199 is preserved
+const FIRST_LOADABLE_ADDR: u16 = 0x200;
+const FRAME_BUFFER_WIDTH: usize = 64;
+const FRAME_BUFFER_HEIGHT: usize = 32;
+
+/**************************************/
 pub struct Chip8Interpreter {
     registers_v: [u8; 16],
     register_i: u16,
@@ -5,68 +13,115 @@ pub struct Chip8Interpreter {
     sound_timer: u8,
     register_pc: u16,
     mem: Mem,
-    pixels: [[u8; 64]; 32],
+    frame_buffer: [[u8; FRAME_BUFFER_WIDTH]; FRAME_BUFFER_HEIGHT],
+    stack: Vec<u16>,
 }
+
 
 #[derive(Debug)]
 enum Instruction {
-    End(u16),
-    I00E0(u16), // Clear screen
-    I00EE(u16), // Return subroutine. i.e: pc = stack.pop()
-    I1NNN(u16), // Jump to instruction ~ pc = nnn
-    I2NNN(u16), // Create subroutine ~ stack.push(pc) & pc = nnn
-    I3XNN(u16), // Skip next instruction if x = nn
-    I6XNN(u16), // Set v[x] = nn
-    I7XNN(u16), // Add nn to v[x] ~ v[x] += nn
-    I9XY0(u16), // Add nn to v[x] ~ v[x] += nn
-    IANNN(u16), // Set vi = nnn
-    IDXYN(u16), // Draw
+    End(Opcode),
+    /// Clear screen
+    I00E0(Opcode),
+    /// Return subroutine. i.e: pc = stack.pop()
+    I00EE(Opcode),
+    /// Jump to instruction ~ pc = nnn
+    I1NNN(Opcode),
+    /// Create subroutine ~ stack.push(pc) & pc = nnn
+    I2NNN(Opcode),
+    /// Skip next instruction if x = nn
+    I3XNN(Opcode),
+    /// Set v[x] = nn
+    I6XNN(Opcode),
+    /// Add nn to v[x] ~ v[x] += nn
+    I7XNN(Opcode),
+    /// Add nn to v[x] ~ v[x] += nn
+    I9XY0(Opcode),
+    /// Set vi = nnn
+    IANNN(Opcode),
+    /// Draw
+    IDXYN(Opcode),
 }
 
-type Mem = [u8; 4096];
+#[derive(Debug)]
+struct Opcode {
+    raw: u16,
+    x: u8,
+    y: u8,
+    n: u8,
+    nnn: u16,
+    kk: u8,
+}
 
+impl Opcode {
+    fn new(raw: u16) -> Opcode {
+        let x = take_param_x(raw);
+        let y = take_param_y(raw);
+        let n = take_param_n(raw);
+        let nnn = take_param_nnn(raw);
+        let kk = take_param_kk(raw);
+
+        Opcode {raw, x, y, n, nnn, kk}
+    }
+}
+
+impl PartialEq<u16> for Opcode {
+    fn eq(&self, raw: &u16) -> bool {
+        self.raw == *raw
+    }
+}
+
+
+type Mem = [u8; MEMORY_SIZE as usize];
+
+fn init_mem() -> Mem {
+    let mut mem = [0; 4096];
+    let fonts = [
+        0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
+        0x20, 0x60, 0x20, 0x20, 0x70, // 1
+        0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
+        0xF0, 0x10, 0xF0, 0x10, 0xF0, // 3
+        0x90, 0x90, 0xF0, 0x10, 0x10, // 4
+        0xF0, 0x80, 0xF0, 0x10, 0xF0, // 5
+        0xF0, 0x80, 0xF0, 0x90, 0xF0, // 6
+        0xF0, 0x10, 0x20, 0x40, 0x40, // 7
+        0xF0, 0x90, 0xF0, 0x90, 0xF0, // 8
+        0xF0, 0x90, 0xF0, 0x10, 0xF0, // 9
+        0xF0, 0x90, 0xF0, 0x90, 0x90, // A
+        0xE0, 0x90, 0xE0, 0x90, 0xE0, // B
+        0xF0, 0x80, 0x80, 0x80, 0xF0, // C
+        0xE0, 0x90, 0x90, 0x90, 0xE0, // D
+        0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
+        0xF0, 0x80, 0xF0, 0x80, 0x80, // F
+    ];
+    // Load font into memory
+    for x in 0..fonts.len() {
+        mem[x] = fonts[x];
+    }
+    
+    mem
+}
 impl Chip8Interpreter {
     pub fn new() -> Chip8Interpreter {
-        let mut mem = [0; 4096];
-        let fonts = [
-            0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
-            0x20, 0x60, 0x20, 0x20, 0x70, // 1
-            0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
-            0xF0, 0x10, 0xF0, 0x10, 0xF0, // 3
-            0x90, 0x90, 0xF0, 0x10, 0x10, // 4
-            0xF0, 0x80, 0xF0, 0x10, 0xF0, // 5
-            0xF0, 0x80, 0xF0, 0x90, 0xF0, // 6
-            0xF0, 0x10, 0x20, 0x40, 0x40, // 7
-            0xF0, 0x90, 0xF0, 0x90, 0xF0, // 8
-            0xF0, 0x90, 0xF0, 0x10, 0xF0, // 9
-            0xF0, 0x90, 0xF0, 0x90, 0x90, // A
-            0xE0, 0x90, 0xE0, 0x90, 0xE0, // B
-            0xF0, 0x80, 0x80, 0x80, 0xF0, // C
-            0xE0, 0x90, 0x90, 0x90, 0xE0, // D
-            0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
-            0xF0, 0x80, 0xF0, 0x80, 0x80  // F
-        ];
-        for x in 0..fonts.len() {
-            mem[x] = fonts[x];
-        }
         Chip8Interpreter {
             registers_v: [0; 16],
             register_i: 0,
             delay_timer: 0,
             sound_timer: 0,
-            register_pc: 0x200,
-            pixels: [[0; 64]; 32],
-            mem,
+            register_pc: FIRST_LOADABLE_ADDR,
+            frame_buffer: [[0; FRAME_BUFFER_WIDTH]; FRAME_BUFFER_HEIGHT],
+            stack: vec![],
+            mem: init_mem(),
         }
     }
 
     fn load_rom(&mut self, path: &str) {
         let file = std::fs::read(path).unwrap();
-        if file.len() > 4096 {
+        if file.len() > 4096 - FIRST_LOADABLE_ADDR as usize {
             panic!("File too long!!");
         }
         for (idx, &byte) in file.iter().enumerate() {
-            self.mem[0x200+idx] = byte;
+            self.mem[0x200 + idx] = byte;
         }
     }
 
@@ -83,93 +138,90 @@ impl Chip8Interpreter {
         self.execute(instruction);
     }
 
-    fn fetch(&mut self) -> u16{
+    fn fetch(&mut self) -> u16 {
         let addr = self.register_pc as usize;
         self.register_pc += 2;
-        ((self.mem[addr] as u16) << 8) | (self.mem[addr+1] as u16) 
+        ((self.mem[addr] as u16) << 8) | (self.mem[addr + 1] as u16)
     }
 
     fn display(&self) {
-        for x in self.pixels {
-            println!("{}", x.map(|x| if x > 0 {"■"} else {" "}).join(""))
+        for x in self.frame_buffer {
+            println!("{}", x.map(|x| if x > 0 { "■" } else { " " }).join(""))
         }
     }
 
-    fn decode(&self, opcode: u16) -> Instruction{
-        if opcode == 0x00 {
+    fn decode(&self, raw_opcode: u16) -> Instruction {
+        let opcode = Opcode::new(raw_opcode);
+        if raw_opcode == 0x00 {
             return Instruction::End(opcode);
         }
-        if opcode == 0x00E0 {
+        if raw_opcode == 0x00E0 {
             return Instruction::I00E0(opcode);
         }
-        if opcode == 0x00EE {
+        if raw_opcode == 0x00EE {
             return Instruction::I00EE(opcode);
         }
-        if opcode >> 12 == 0x1 {
+        if raw_opcode >> 12 == 0x1 {
             return Instruction::I1NNN(opcode);
         }
-        if opcode >> 12 == 0x2 {
+        if raw_opcode >> 12 == 0x2 {
             return Instruction::I2NNN(opcode);
         }
-        if opcode >> 12 == 0x3 {
+        if raw_opcode >> 12 == 0x3 {
             return Instruction::I3XNN(opcode);
         }
-        if opcode >> 12 == 0x6 {
+        if raw_opcode >> 12 == 0x6 {
             return Instruction::I6XNN(opcode);
         }
-        if opcode >> 12 == 0x7 {
+        if raw_opcode >> 12 == 0x7 {
             return Instruction::I7XNN(opcode);
         }
-        if opcode >> 12 == 0xA {
+        if raw_opcode >> 12 == 0xA {
             return Instruction::IANNN(opcode);
         }
-        if opcode >> 12 == 0x9 {
+        if raw_opcode >> 12 == 0x9 {
             return Instruction::I9XY0(opcode);
         }
-        if opcode >> 12 == 0xD {
+        if raw_opcode >> 12 == 0xD {
             return Instruction::IDXYN(opcode);
         }
-        panic!("Unknow opcode {:#04x} at pc {}!", opcode, self.register_pc);
+        panic!("Unknow opcode {:#04x} at pc {}!", raw_opcode, self.register_pc);
     }
-    
     fn execute(&mut self, inst: Instruction) {
         match inst {
             Instruction::End(_) => {
                 std::process::exit(0);
             }
             Instruction::I00E0(_) => {
-                self.pixels = [[0; 64]; 32];
+                self.frame_buffer = [[0; FRAME_BUFFER_WIDTH]; FRAME_BUFFER_HEIGHT];
             }
             Instruction::I1NNN(opcode) => {
-                self.register_pc = take_param_nnn(opcode);
+                self.register_pc = opcode.nnn;
+            }
+            Instruction::I2NNN(opcode) => {
+                self.stack.push(self.register_pc);
+                self.register_pc = opcode.nnn;
             }
             Instruction::I3XNN(_) => {
                 panic!("Not implemented");
             }
             Instruction::I6XNN(opcode) => {
-                let x = take_param_x(opcode);
-                let kk = take_param_kk(opcode);
-                self.registers_v[x as usize] = kk;
+                self.registers_v[opcode.x as usize] = opcode.kk;
             }
             Instruction::I7XNN(opcode) => {
-                let x = take_param_x(opcode);
-                let kk = take_param_kk(opcode);
-                self.registers_v[x as usize] += kk;
+                self.registers_v[opcode.x as usize] += opcode.kk;
             }
             Instruction::IANNN(opcode) => {
-                let nnn = take_param_nnn(opcode);
-                self.register_i = nnn;
+                self.register_i = opcode.nnn;
             }
             Instruction::IDXYN(opcode) => {
-                let x = take_param_x(opcode);
-                let y = take_param_y(opcode);
-                let n = take_param_n(opcode);
-                let x_cor = self.registers_v[x as usize] & 63;
-                let y_cor = self.registers_v[y as usize] & 31;
+                let x_cor = self.registers_v[opcode.x as usize] & 63;
+                let y_cor = self.registers_v[opcode.y as usize] & 31;
                 self.registers_v[0xF] = 0;
-                self.registers_v[0xF] = display(&mut self.pixels, self.mem, self.register_i, x_cor, y_cor, n);
+                self.registers_v[0xF] =
+                    display(&mut self.frame_buffer, self.mem, self.register_i, x_cor, y_cor, opcode.n);
             }
-            _ => panic!("Instruction not implemented!")
+            _ => panic!("Instruction not implemented!"),
         }
     }
 }
@@ -194,11 +246,11 @@ fn take_param_y(opcode: u16) -> u8 {
     ((opcode & 0x00F0) >> 4) as u8
 }
 
-fn display(pixels: &mut [[u8; 64]; 32], mem: Mem, i: u16, x_cor: u8, y_cor: u8, n: u8) -> u8 {
+fn display(pixels: &mut [[u8; FRAME_BUFFER_WIDTH]; FRAME_BUFFER_HEIGHT], mem: Mem, i: u16, x_cor: u8, y_cor: u8, n: u8) -> u8 {
     let mut ret = 0;
     for row in 0..n {
         let mut sprite = mem[(i + row as u16) as usize];
-        for x in 0..8{
+        for x in 0..8 {
             if sprite >> 7 > 0 {
                 let to_y = ((y_cor + row) & 31) as usize;
                 let to_x = ((x_cor + x) & 63) as usize;
@@ -206,7 +258,7 @@ fn display(pixels: &mut [[u8; 64]; 32], mem: Mem, i: u16, x_cor: u8, y_cor: u8, 
                 pixels[to_y][to_x] ^= 1;
                 if old != pixels[to_y][to_x] {
                     ret = 1;
-                } 
+                }
             }
             sprite <<= 1;
         }
@@ -270,14 +322,14 @@ mod tests {
         let mut cpu = Chip8Interpreter::new();
         cpu.mem[0] = 0b11111000;
         cpu.mem[1] = 0;
-        cpu.pixels = [[1; 64]; 32];
-        assert_eq!(display(&mut cpu.pixels, cpu.mem, 0, 63, 31, 1), 1);
-        assert_eq!(display(&mut cpu.pixels, cpu.mem, 1, 63, 31, 1), 0);
-        assert_eq!(cpu.pixels[31][63], 0);
-        assert_eq!(cpu.pixels[31][0], 0);
-        assert_eq!(cpu.pixels[31][1], 0);
-        assert_eq!(cpu.pixels[31][2], 0);
-        assert_eq!(cpu.pixels[31][3], 0);
+        cpu.frame_buffer = [[1; FRAME_BUFFER_WIDTH]; FRAME_BUFFER_HEIGHT];
+        assert_eq!(display(&mut cpu.frame_buffer, cpu.mem, 0, 63, 31, 1), 1);
+        assert_eq!(display(&mut cpu.frame_buffer, cpu.mem, 1, 63, 31, 1), 0);
+        assert_eq!(cpu.frame_buffer[31][63], 0);
+        assert_eq!(cpu.frame_buffer[31][0], 0);
+        assert_eq!(cpu.frame_buffer[31][1], 0);
+        assert_eq!(cpu.frame_buffer[31][2], 0);
+        assert_eq!(cpu.frame_buffer[31][3], 0);
     }
 
     #[test]
