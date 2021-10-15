@@ -1,4 +1,7 @@
+extern crate crossbeam_channel;
+use std::time::Duration;
 use crate::chip8::opcode::Opcode;
+use crossbeam_channel::{tick, select};
 
 // Declare specification in constant
 const MEMORY_SIZE: u16 = 4096;
@@ -24,14 +27,15 @@ const FONTS_DATA: [u8; 80] = [
     0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
     0xF0, 0x80, 0xF0, 0x80, 0x80, // F
 ];
+const INSTRUCTIONS_PER_SECOND: f64 = 700.;
 /**************************************/
 mod opcode;
 
 pub struct Chip8Interpreter {
     registers_v: [u8; 16],
     register_i: u16,
-    delay_timer: u8,
-    sound_timer: u8,
+    delay_timer: u16,
+    sound_timer: u16,
     register_pc: u16,
     mem: Mem,
     frame_buffer: [[u8; FRAME_BUFFER_WIDTH]; FRAME_BUFFER_HEIGHT],
@@ -105,9 +109,23 @@ impl Chip8Interpreter {
     }
 
     pub fn run_rom(&mut self, path: &str) {
+        let timer_ticker = tick(Duration::from_millis(((1.0/60.0)*1000.) as u64));
+        let cpu_timer = tick(Duration::from_millis(((1.0/INSTRUCTIONS_PER_SECOND)*1000.) as u64));
         self.load_rom(path);
         loop {
-            self.exec();
+            select! {
+                recv(timer_ticker) -> _ => {
+                    if self.delay_timer != 0 {
+                        self.delay_timer -= 1;
+                    }
+                    if self.sound_timer != 0 {
+                        self.sound_timer -= 1;
+                    }
+                }
+                recv(cpu_timer) -> _ => {
+                    self.exec();
+                }
+            }
         }
     }
 
@@ -291,6 +309,7 @@ mod tests {
     #[ignore]
     fn test_bc() {
         let mut cpu = Chip8Interpreter::new();
-        cpu.run_rom("bc_test.ch8");
+        cpu.delay_timer = 600;
+        cpu.run_rom("ibmrom.ch8");
     }
 }
