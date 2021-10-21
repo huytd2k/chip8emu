@@ -50,24 +50,58 @@ enum Instruction {
     I00E0(Opcode),
     /// Return subroutine. i.e: pc = stack.pop()
     I00EE(Opcode),
+
     /// Jump to instruction ~ pc = nnn
     I1NNN(Opcode),
+
     /// Create subroutine ~ stack.push(pc) & pc = nnn
     I2NNN(Opcode),
+
     /// Skip next instruction if x = nn
     I3XNN(Opcode),
+
     /// Skip next instruction if x != nn
     I4XNN(Opcode),
+
     /// Skip next instruction if x == y
     I5XY0(Opcode),
+
     /// Set v[x] = nn
     I6XNN(Opcode),
+
     /// Add nn to v[x] ~ v[x] += nn
     I7XNN(Opcode),
+
+    /// Set v[x] = v[y]
+    I8XY0(Opcode),
+
+    /// v[x] = v[x] OR v[y]
+    I8XY1(Opcode), 
+
+    /// v[x] = v[x] AND v[y]
+    I8XY2(Opcode), 
+
+    /// v[x] = v[x] XOR v[y]
+    I8XY3(Opcode), 
+
+    /// v[x] = v[x] + v[y], set v[f] = 1 if overflow
+    I8XY4(Opcode), 
+
+    /// v[x] = v[x] - v[y], set v[f] = 0 if underflow
+    I8XY5(Opcode), 
+
+    /// v[x] = v[y] - v[x], set v[f] = 0 if underflow
+    I8XY7(Opcode), 
+
+    /// if old_shift: v[x] = v[y], v[x] >> 1 
+    I8XY6(Opcode), 
+
     /// Skip next instruction if x != y
     I9XY0(Opcode),
+
     /// Set vi = nnn
     IANNN(Opcode),
+
     /// Draw
     IDXYN(Opcode),
 }
@@ -123,7 +157,9 @@ impl Chip8Interpreter {
                     }
                 }
                 recv(cpu_timer) -> _ => {
-                    self.exec();
+                    if self.delay_timer == 0 {
+                        self.exec();
+                    }
                 }
             }
         }
@@ -271,6 +307,34 @@ fn display(pixels: &mut [[u8; FRAME_BUFFER_WIDTH]; FRAME_BUFFER_HEIGHT], mem: Me
     ret
 }
 
+fn shift_left_carry(val: &mut u8) -> u8 {
+    let shifted_out = *val >> 7;
+    *val <<= 1;
+
+    shifted_out
+}
+
+fn shift_right_carry(val: &mut u8) -> u8 {
+    let shifted_out = *val & 0x1;
+    *val >>= 1;
+
+    shifted_out
+}
+
+fn add_carry(a: u8, b: u8) -> (u8, u8) {
+    let sum_16 = (a as u16) + (b as u16);
+
+    ((sum_16 >> 8) as u8, (sum_16 & 0xFF) as u8)
+}
+
+fn subtract_carry(a: u8, b: u8) -> (u8, u8) {
+    if a >= b {
+        (0, a-b)
+    } else {
+        (1, (256+(a as u16) - (b as u16)) as u8)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -309,7 +373,46 @@ mod tests {
     #[ignore]
     fn test_bc() {
         let mut cpu = Chip8Interpreter::new();
-        cpu.delay_timer = 600;
+        // cpu.delay_timer = 60;
         cpu.run_rom("ibmrom.ch8");
+    }
+
+    #[test]
+    fn test_shift_left() {
+        let mut val = 0b1011_1111;
+        assert_eq!(shift_left_carry(&mut val), 1);
+        assert_eq!(val, 0b0111_1110);
+
+        let mut val = 0b0011_1111;
+        assert_eq!(shift_left_carry(&mut val), 0);
+        assert_eq!(val, 0b0111_1110);
+    }
+
+    #[test]
+    fn test_shift_right() {
+        let mut val = 0b1011_1111;
+        assert_eq!(shift_right_carry(&mut val), 1);
+        assert_eq!(val, 0b0101_1111);
+
+        let mut val = 0b0011_1110;
+        assert_eq!(shift_right_carry(&mut val), 0);
+        assert_eq!(val, 0b0001_1111);
+    }
+
+    #[test]
+    fn test_add_carry() {
+        assert_eq!(add_carry(0, 0), (0, 0));
+        assert_eq!(add_carry(1, 1), (0, 2));
+        assert_eq!(add_carry(5, 13), (0, 18));
+        assert_eq!(add_carry(255, 1), (1, 0));
+        assert_eq!(add_carry(255, 10), (1, 9));
+        assert_eq!(add_carry(255, 255), (1, 254));
+    }
+
+    #[test]
+    fn test_subtract_carry() {
+        assert_eq!(subtract_carry(0, 0), (0, 0));
+        assert_eq!(subtract_carry(0, 1), (1, 255));
+        assert_eq!(subtract_carry(10, 20), (1, 246));
     }
 }
