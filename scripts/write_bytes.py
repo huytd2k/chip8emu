@@ -1,4 +1,4 @@
-some_bytes = b'\xAB\xBC'
+some_bytes = b'\xFB\xBC'
   
 # Open file in binary write mode
 with open("my_file.txt", "wb") as binary_file:

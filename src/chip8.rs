@@ -1,6 +1,8 @@
+mod instruction;
 extern crate crossbeam_channel;
 use std::time::Duration;
-use crate::chip8::opcode::Opcode;
+use crate::chip8::instruction::Opcode;
+use crate::chip8::instruction::Instruction;
 use crossbeam_channel::{tick, select};
 
 // Declare specification in constant
@@ -28,8 +30,6 @@ const FONTS_DATA: [u8; 80] = [
     0xF0, 0x80, 0xF0, 0x80, 0x80, // F
 ];
 const INSTRUCTIONS_PER_SECOND: f64 = 700.;
-/**************************************/
-mod opcode;
 
 pub struct Chip8Interpreter {
     registers_v: [u8; 16],
@@ -42,69 +42,6 @@ pub struct Chip8Interpreter {
     stack: Vec<u16>,
 }
 
-
-#[derive(Debug)]
-enum Instruction {
-    End(Opcode),
-    /// Clear screen
-    I00E0(Opcode),
-    /// Return subroutine. i.e: pc = stack.pop()
-    I00EE(Opcode),
-
-    /// Jump to instruction ~ pc = nnn
-    I1NNN(Opcode),
-
-    /// Create subroutine ~ stack.push(pc) & pc = nnn
-    I2NNN(Opcode),
-
-    /// Skip next instruction if x = nn
-    I3XNN(Opcode),
-
-    /// Skip next instruction if x != nn
-    I4XNN(Opcode),
-
-    /// Skip next instruction if x == y
-    I5XY0(Opcode),
-
-    /// Set v[x] = nn
-    I6XNN(Opcode),
-
-    /// Add nn to v[x] ~ v[x] += nn
-    I7XNN(Opcode),
-
-    /// Set v[x] = v[y]
-    I8XY0(Opcode),
-
-    /// v[x] = v[x] OR v[y]
-    I8XY1(Opcode), 
-
-    /// v[x] = v[x] AND v[y]
-    I8XY2(Opcode), 
-
-    /// v[x] = v[x] XOR v[y]
-    I8XY3(Opcode), 
-
-    /// v[x] = v[x] + v[y], set v[f] = 1 if overflow
-    I8XY4(Opcode), 
-
-    /// v[x] = v[x] - v[y], set v[f] = 0 if underflow
-    I8XY5(Opcode), 
-
-    /// v[x] = v[y] - v[x], set v[f] = 0 if underflow
-    I8XY7(Opcode), 
-
-    /// if old_shift: v[x] = v[y], v[x] >> 1 
-    I8XY6(Opcode), 
-
-    /// Skip next instruction if x != y
-    I9XY0(Opcode),
-
-    /// Set vi = nnn
-    IANNN(Opcode),
-
-    /// Draw
-    IDXYN(Opcode),
-}
 
 
 type Mem = [u8; MEMORY_SIZE as usize];
@@ -184,48 +121,11 @@ impl Chip8Interpreter {
     }
 
     fn decode(&self, raw_opcode: u16) -> Instruction {
-        let opcode = Opcode::new(raw_opcode);
-        if raw_opcode == 0x00 {
-            return Instruction::End(opcode);
-        }
-        if raw_opcode == 0x00E0 {
-            return Instruction::I00E0(opcode);
-        }
-        if raw_opcode == 0x00EE {
-            return Instruction::I00EE(opcode);
-        }
-        if raw_opcode >> 12 == 0x1 {
-            return Instruction::I1NNN(opcode);
-        }
-        if raw_opcode >> 12 == 0x2 {
-            return Instruction::I2NNN(opcode);
-        }
-        if raw_opcode >> 12 == 0x3 {
-            return Instruction::I3XNN(opcode);
-        }
-        if raw_opcode >> 12 == 0x4 {
-            return Instruction::I4XNN(opcode);
-        }
-        if raw_opcode >> 12 == 0x5 {
-            return Instruction::I5XY0(opcode);
-        }
-        if raw_opcode >> 12 == 0x6 {
-            return Instruction::I6XNN(opcode);
-        }
-        if raw_opcode >> 12 == 0x7 {
-            return Instruction::I7XNN(opcode);
-        }
-        if raw_opcode >> 12 == 0xA {
-            return Instruction::IANNN(opcode);
-        }
-        if raw_opcode >> 12 == 0x9 {
-            return Instruction::I9XY0(opcode);
-        }
-        if raw_opcode >> 12 == 0xD {
-            return Instruction::IDXYN(opcode);
-        }
-        panic!("Unknow opcode {:#04x} at pc {}!", raw_opcode, self.register_pc);
+        Instruction::from_raw_opcode(raw_opcode).unwrap_or_else(|err| {
+            panic!("Err:{} at instruction {:#04x} at address {:#04x}", err, raw_opcode, self.register_pc)
+        })
     }
+
     fn execute(&mut self, inst: Instruction) {
         match inst {
             Instruction::End(_) => {
@@ -271,6 +171,23 @@ impl Chip8Interpreter {
             Instruction::I7XNN(opcode) => {
                 self.registers_v[opcode.x as usize] += opcode.kk;
             }
+            Instruction::I8XY0(opcode) => {
+                self.registers_v[opcode.x as usize] = self.registers_v[opcode.y as usize]
+            }
+            Instruction::I8XY1(opcode) => {
+                self.registers_v[opcode.x as usize] |= self.registers_v[opcode.y as usize]
+            }
+            Instruction::I8XY2(opcode) => {
+                self.registers_v[opcode.x as usize] &= self.registers_v[opcode.y as usize]
+            }
+            Instruction::I8XY3(opcode) => {
+                self.registers_v[opcode.x as usize] ^= self.registers_v[opcode.y as usize]
+            }
+            Instruction::I8XY4(opcode) => {
+                let (carry, sum) = add_carry(self.registers_v[opcode.x as usize], self.registers_v[opcode.y as usize]);
+                self.registers_v[opcode.x as usize] = sum;
+                self.registers_v[0xF] = carry;
+            }
             Instruction::IANNN(opcode) => {
                 self.register_i = opcode.nnn;
             }
@@ -280,6 +197,7 @@ impl Chip8Interpreter {
                 self.registers_v[0xF] = 0;
                 self.registers_v[0xF] =
                     display(&mut self.frame_buffer, self.mem, self.register_i, x_cor, y_cor, opcode.n);
+                self.display();
             }
             _ => panic!("Instruction not implemented!"),
         }
@@ -370,11 +288,10 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_bc() {
         let mut cpu = Chip8Interpreter::new();
         // cpu.delay_timer = 60;
-        cpu.run_rom("ibmrom.ch8");
+        cpu.run_rom("my_file.txt");
     }
 
     #[test]
