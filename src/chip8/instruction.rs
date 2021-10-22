@@ -1,3 +1,4 @@
+#[derive(PartialEq)]
 #[derive(Debug)]
 pub struct Opcode {
     pub raw: u16,
@@ -8,6 +9,7 @@ pub struct Opcode {
     pub kk: u8,
 }
 
+#[derive(PartialEq)]
 #[derive(Debug)]
 pub enum Instruction {
     End(Opcode),
@@ -61,6 +63,9 @@ pub enum Instruction {
     /// if old_shift: v[x] = v[y], v[x] >> 1 
     I8XY6(Opcode), 
 
+    /// if old_shift: v[x] = v[y], v[x] << 1 
+    I8XYE(Opcode), 
+
     /// Skip next instruction if x != y
     I9XY0(Opcode),
 
@@ -106,7 +111,7 @@ impl Instruction {
         }
         if raw_opcode >> 12 == 0x8 {
             let last_nible = raw_opcode & 0xF;
-            if last_nible == 1 {
+            if last_nible == 0 {
                 return Ok(Instruction::I8XY0(opcode));
             }
             if last_nible == 1 {
@@ -130,6 +135,9 @@ impl Instruction {
             if last_nible == 7 {
                 return Ok(Instruction::I8XY7(opcode))
             }
+            if last_nible == 0xE {
+                return Ok(Instruction::I8XYE(opcode))
+            }
         }
         if raw_opcode >> 12 == 0xA {
             return Ok(Instruction::IANNN(opcode));
@@ -140,6 +148,7 @@ impl Instruction {
         if raw_opcode >> 12 == 0xD {
             return Ok(Instruction::IDXYN(opcode))
         }
+
         Err(String::from("Cannot decode instruction"))
     }
 }
@@ -215,5 +224,35 @@ mod tests {
     fn test_take_param_y() {
         assert_eq!(take_param_y(0x8C74), 0x07);
         assert_eq!(take_param_y(0xAB12), 0x01);
+    }
+
+    #[test]
+    fn test_instruction_from_raw_code() {
+        assert_eq!(Instruction::from_raw_opcode(0xE0).unwrap(), Instruction::I00E0(Opcode::new(0xE0)));
+        assert_eq!(Instruction::from_raw_opcode(0xEE).unwrap(), Instruction::I00EE(Opcode::new(0xEE)));
+        assert_eq!(Instruction::from_raw_opcode(0x1234).unwrap(), Instruction::I1NNN(Opcode::new(0x1234)));
+        assert_eq!(Instruction::from_raw_opcode(0x2234).unwrap(), Instruction::I2NNN(Opcode::new(0x2234)));
+        assert_eq!(Instruction::from_raw_opcode(0x3234).unwrap(), Instruction::I3XNN(Opcode::new(0x3234)));
+        assert_eq!(Instruction::from_raw_opcode(0x4234).unwrap(), Instruction::I4XNN(Opcode::new(0x4234)));
+        assert_eq!(Instruction::from_raw_opcode(0x5230).unwrap(), Instruction::I5XY0(Opcode::new(0x5230)));
+        assert_eq!(Instruction::from_raw_opcode(0x8230).unwrap(), Instruction::I8XY0(Opcode::new(0x8230)));
+        assert_eq!(Instruction::from_raw_opcode(0x8231).unwrap(), Instruction::I8XY1(Opcode::new(0x8231)));
+        assert_eq!(Instruction::from_raw_opcode(0x8232).unwrap(), Instruction::I8XY2(Opcode::new(0x8232)));
+        assert_eq!(Instruction::from_raw_opcode(0x8233).unwrap(), Instruction::I8XY3(Opcode::new(0x8233)));
+        assert_eq!(Instruction::from_raw_opcode(0x8234).unwrap(), Instruction::I8XY4(Opcode::new(0x8234)));
+        assert_eq!(Instruction::from_raw_opcode(0x8235).unwrap(), Instruction::I8XY5(Opcode::new(0x8235)));
+        assert_eq!(Instruction::from_raw_opcode(0x8236).unwrap(), Instruction::I8XY6(Opcode::new(0x8236)));
+        assert_eq!(Instruction::from_raw_opcode(0x8237).unwrap(), Instruction::I8XY7(Opcode::new(0x8237)));
+        assert_eq!(Instruction::from_raw_opcode(0x823E).unwrap(), Instruction::I8XYE(Opcode::new(0x823E)));
+    }
+
+    #[test]
+    fn test_opcode() {
+        let op = Opcode::new(0xFABC);
+        assert_eq!(op.kk, 0xBC);
+        assert_eq!(op.nnn, 0xABC);
+        assert_eq!(op.x, 0xA);
+        assert_eq!(op.y, 0xB);
+        assert_eq!(op.n, 0xC);
     }
 }

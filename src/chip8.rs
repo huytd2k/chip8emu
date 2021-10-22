@@ -1,7 +1,8 @@
 mod instruction;
+
 extern crate crossbeam_channel;
+
 use std::time::Duration;
-use crate::chip8::instruction::Opcode;
 use crate::chip8::instruction::Instruction;
 use crossbeam_channel::{tick, select};
 
@@ -40,9 +41,8 @@ pub struct Chip8Interpreter {
     mem: Mem,
     frame_buffer: [[u8; FRAME_BUFFER_WIDTH]; FRAME_BUFFER_HEIGHT],
     stack: Vec<u16>,
+    old_shift: bool,
 }
-
-
 
 type Mem = [u8; MEMORY_SIZE as usize];
 
@@ -55,6 +55,7 @@ fn init_mem() -> Mem {
     
     mem
 }
+
 impl Chip8Interpreter {
     pub fn new() -> Chip8Interpreter {
         Chip8Interpreter {
@@ -66,13 +67,15 @@ impl Chip8Interpreter {
             frame_buffer: [[0; FRAME_BUFFER_WIDTH]; FRAME_BUFFER_HEIGHT],
             stack: vec![],
             mem: init_mem(),
+            old_shift: false,
         }
     }
 
     fn load_rom(&mut self, path: &str) {
         let file = std::fs::read(path).unwrap();
-        if file.len() > 4096 - FIRST_LOADABLE_ADDR as usize {
-            panic!("File too long!!");
+        let file_length_threshold = MEMORY_SIZE - FIRST_LOADABLE_ADDR;
+        if file.len() > file_length_threshold as usize {
+            panic!("Err: Rom too long, only support rom with less than {} bytes!!", file_length_threshold);
         }
         for (idx, &byte) in file.iter().enumerate() {
             self.mem[0x200 + idx] = byte;
@@ -80,6 +83,7 @@ impl Chip8Interpreter {
     }
 
     pub fn run_rom(&mut self, path: &str) {
+        // Timer is 60 tick per second
         let timer_ticker = tick(Duration::from_millis(((1.0/60.0)*1000.) as u64));
         let cpu_timer = tick(Duration::from_millis(((1.0/INSTRUCTIONS_PER_SECOND)*1000.) as u64));
         self.load_rom(path);
@@ -188,6 +192,28 @@ impl Chip8Interpreter {
                 self.registers_v[opcode.x as usize] = sum;
                 self.registers_v[0xF] = carry;
             }
+            Instruction::I8XY5(opcode) => {
+                let (carry, sub) = subtract_carry(self.registers_v[opcode.x as usize], self.registers_v[opcode.y as usize]);
+                self.registers_v[opcode.x as usize] = sub;
+                self.registers_v[0xF] = carry;
+            }
+            Instruction::I8XY6(opcode) => {
+                if self.old_shift {
+                    self.registers_v[opcode.x as usize] = self.registers_v[opcode.y as usize];
+                }
+                self.registers_v[0xF] = shift_left_carry(&mut self.registers_v[opcode.x as usize])
+            }
+            Instruction::I8XYE(opcode) => {
+                if self.old_shift {
+                    self.registers_v[opcode.x as usize] = self.registers_v[opcode.y as usize];
+                }
+                self.registers_v[0xF] = shift_right_carry(&mut self.registers_v[opcode.x as usize])
+            }
+            Instruction::I8XY7(opcode) => {
+                let (carry, sub) = subtract_carry(self.registers_v[opcode.y as usize], self.registers_v[opcode.x as usize]);
+                self.registers_v[opcode.x as usize] = sub;
+                self.registers_v[0xF] = carry;
+            }
             Instruction::IANNN(opcode) => {
                 self.register_i = opcode.nnn;
             }
@@ -199,7 +225,7 @@ impl Chip8Interpreter {
                     display(&mut self.frame_buffer, self.mem, self.register_i, x_cor, y_cor, opcode.n);
                 self.display();
             }
-            _ => panic!("Instruction not implemented!"),
+            _ => panic!("Instruction {:#?} not implemented to be executed", inst),
         }
     }
 }
@@ -253,6 +279,9 @@ fn subtract_carry(a: u8, b: u8) -> (u8, u8) {
     }
 }
 
+
+
+/* TEST */
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -288,6 +317,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_bc() {
         let mut cpu = Chip8Interpreter::new();
         // cpu.delay_timer = 60;
