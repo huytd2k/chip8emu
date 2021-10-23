@@ -72,6 +72,15 @@ pub enum Instruction {
     /// Set vi = nnn
     IANNN(Opcode),
 
+    /// Jump to address nnn + v[0]
+    IBNNN(Opcode),
+
+    /// vx = rand() & nn
+    ICXNN(Opcode),
+
+    /// vi += v[x], if vi > 0xFFF, set v[f] =1
+    IFX1E(Opcode),
+
     /// Draw
     IDXYN(Opcode),
 }

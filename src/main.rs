@@ -1,11 +1,13 @@
-use crate::chip8::Chip8Interpreter;
-
+extern crate minifb;
 mod chip8;
 
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    let rom_path = &args[1];
+use crate::chip8::Chip8Interpreter;
+use minifb::{Key, Window, WindowOptions};
 
-    let mut interpreter = Chip8Interpreter::new();
-    interpreter.run_rom(rom_path);
+const WIDTH: usize = 640;
+const HEIGHT: usize = 360;
+
+fn main() {
+    let mut cpu = Chip8Interpreter::new();
+    cpu.run_rom("ibmrom.ch8");
 }

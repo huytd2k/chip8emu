@@ -2,9 +2,11 @@ mod instruction;
 
 extern crate crossbeam_channel;
 
-use std::time::Duration;
+use minifb::{Window, WindowOptions, Key};
 use crate::chip8::instruction::Instruction;
-use crossbeam_channel::{tick, select};
+use crossbeam_channel::{select, tick};
+use std::time::Duration;
+use std::mem::transmute;
 
 // Declare specification in constant
 const MEMORY_SIZE: u16 = 4096;
@@ -39,7 +41,7 @@ pub struct Chip8Interpreter {
     sound_timer: u16,
     register_pc: u16,
     mem: Mem,
-    frame_buffer: [[u8; FRAME_BUFFER_WIDTH]; FRAME_BUFFER_HEIGHT],
+    frame_buffer: [[u32; FRAME_BUFFER_WIDTH]; FRAME_BUFFER_HEIGHT],
     stack: Vec<u16>,
     old_shift: bool,
 }
@@ -52,7 +54,6 @@ fn init_mem() -> Mem {
     for x in 0..FONTS_DATA.len() {
         mem[x] = FONTS_DATA[x];
     }
-    
     mem
 }
 
@@ -75,7 +76,10 @@ impl Chip8Interpreter {
         let file = std::fs::read(path).unwrap();
         let file_length_threshold = MEMORY_SIZE - FIRST_LOADABLE_ADDR;
         if file.len() > file_length_threshold as usize {
-            panic!("Err: Rom too long, only support rom with less than {} bytes!!", file_length_threshold);
+            panic!(
+                "Err: Rom too long, only support rom with less than {} bytes!!",
+                file_length_threshold
+            );
         }
         for (idx, &byte) in file.iter().enumerate() {
             self.mem[0x200 + idx] = byte;
@@ -84,8 +88,21 @@ impl Chip8Interpreter {
 
     pub fn run_rom(&mut self, path: &str) {
         // Timer is 60 tick per second
-        let timer_ticker = tick(Duration::from_millis(((1.0/60.0)*1000.) as u64));
-        let cpu_timer = tick(Duration::from_millis(((1.0/INSTRUCTIONS_PER_SECOND)*1000.) as u64));
+        let mut window = Window::new(
+            "Test - ESC to exit",
+            FRAME_BUFFER_WIDTH*10,
+            FRAME_BUFFER_HEIGHT*10,
+            WindowOptions::default(),
+        )
+        .unwrap_or_else(|e| {
+            panic!("{}", e);
+        });
+        // Limit to max ~60 fps update rate
+        window.limit_update_rate(Some(std::time::Duration::from_micros(16600)));
+        let timer_ticker = tick(Duration::from_millis(((1.0 / 60.0) * 1000.) as u64));
+        let cpu_timer = tick(Duration::from_millis(
+            ((1.0 / INSTRUCTIONS_PER_SECOND) * 1000.) as u64,
+        ));
         self.load_rom(path);
         loop {
             select! {
@@ -100,6 +117,16 @@ impl Chip8Interpreter {
                 recv(cpu_timer) -> _ => {
                     if self.delay_timer == 0 {
                         self.exec();
+                        if window.is_open() && !window.is_key_down(Key::Escape) {
+                            let mut arr_ref: Vec<u32> = vec![0; FRAME_BUFFER_HEIGHT*FRAME_BUFFER_WIDTH];
+                            let bufferr: [u32; FRAME_BUFFER_HEIGHT*FRAME_BUFFER_WIDTH] = unsafe {transmute(self.frame_buffer)};
+                            for (idx, a) in arr_ref.iter_mut().enumerate() {
+                                if bufferr[idx] == 1 {
+                                    *a = 0xFFFFFF;
+                                }
+                            }
+                            window.update_with_buffer(&arr_ref, FRAME_BUFFER_WIDTH, FRAME_BUFFER_HEIGHT).unwrap();
+                        }
                     }
                 }
             }
@@ -126,7 +153,10 @@ impl Chip8Interpreter {
 
     fn decode(&self, raw_opcode: u16) -> Instruction {
         Instruction::from_raw_opcode(raw_opcode).unwrap_or_else(|err| {
-            panic!("Err:{} at instruction {:#04x} at address {:#04x}", err, raw_opcode, self.register_pc)
+            panic!(
+                "Err:{} at instruction {:#04x} at address {:#04x}",
+                err, raw_opcode, self.register_pc
+            )
         })
     }
 
@@ -137,7 +167,7 @@ impl Chip8Interpreter {
             }
             Instruction::I00E0(_) => {
                 self.frame_buffer = [[0; FRAME_BUFFER_WIDTH]; FRAME_BUFFER_HEIGHT];
-            }   
+            }
             Instruction::I00EE(_) => {
                 // NOTE: error handling
                 self.register_pc = self.stack.pop().unwrap();
@@ -188,12 +218,18 @@ impl Chip8Interpreter {
                 self.registers_v[opcode.x as usize] ^= self.registers_v[opcode.y as usize]
             }
             Instruction::I8XY4(opcode) => {
-                let (carry, sum) = add_carry(self.registers_v[opcode.x as usize], self.registers_v[opcode.y as usize]);
+                let (carry, sum) = add_carry(
+                    self.registers_v[opcode.x as usize],
+                    self.registers_v[opcode.y as usize],
+                );
                 self.registers_v[opcode.x as usize] = sum;
                 self.registers_v[0xF] = carry;
             }
             Instruction::I8XY5(opcode) => {
-                let (carry, sub) = subtract_carry(self.registers_v[opcode.x as usize], self.registers_v[opcode.y as usize]);
+                let (carry, sub) = subtract_carry(
+                    self.registers_v[opcode.x as usize],
+                    self.registers_v[opcode.y as usize],
+                );
                 self.registers_v[opcode.x as usize] = sub;
                 self.registers_v[0xF] = carry;
             }
@@ -210,7 +246,10 @@ impl Chip8Interpreter {
                 self.registers_v[0xF] = shift_right_carry(&mut self.registers_v[opcode.x as usize])
             }
             Instruction::I8XY7(opcode) => {
-                let (carry, sub) = subtract_carry(self.registers_v[opcode.y as usize], self.registers_v[opcode.x as usize]);
+                let (carry, sub) = subtract_carry(
+                    self.registers_v[opcode.y as usize],
+                    self.registers_v[opcode.x as usize],
+                );
                 self.registers_v[opcode.x as usize] = sub;
                 self.registers_v[0xF] = carry;
             }
@@ -221,16 +260,32 @@ impl Chip8Interpreter {
                 let x_cor = self.registers_v[opcode.x as usize] & 63;
                 let y_cor = self.registers_v[opcode.y as usize] & 31;
                 self.registers_v[0xF] = 0;
-                self.registers_v[0xF] =
-                    display(&mut self.frame_buffer, self.mem, self.register_i, x_cor, y_cor, opcode.n);
+                self.registers_v[0xF] = display(
+                    &mut self.frame_buffer,
+                    self.mem,
+                    self.register_i,
+                    x_cor,
+                    y_cor,
+                    opcode.n,
+                );
                 self.display();
             }
-            _ => panic!("Instruction {:#?} not implemented to be executed", inst),
+            _ => panic!(
+                "Instruction {:#?} is decoded but not implemented to be executed",
+                inst
+            ),
         }
     }
 }
 
-fn display(pixels: &mut [[u8; FRAME_BUFFER_WIDTH]; FRAME_BUFFER_HEIGHT], mem: Mem, i: u16, x_cor: u8, y_cor: u8, n: u8) -> u8 {
+fn display(
+    pixels: &mut [[u32; FRAME_BUFFER_WIDTH]; FRAME_BUFFER_HEIGHT],
+    mem: Mem,
+    i: u16,
+    x_cor: u8,
+    y_cor: u8,
+    n: u8,
+) -> u8 {
     let mut ret = 0;
     for row in 0..n {
         let mut sprite = mem[(i + row as u16) as usize];
@@ -273,13 +328,11 @@ fn add_carry(a: u8, b: u8) -> (u8, u8) {
 
 fn subtract_carry(a: u8, b: u8) -> (u8, u8) {
     if a >= b {
-        (0, a-b)
+        (0, a - b)
     } else {
-        (1, (256+(a as u16) - (b as u16)) as u8)
+        (1, (256 + (a as u16) - (b as u16)) as u8)
     }
 }
-
-
 
 /* TEST */
 #[cfg(test)]
