@@ -114,8 +114,7 @@ impl Chip8Interpreter<'_> {
                         recv(cpu_timer) -> _ => {
                             if self.delay_timer == 0 {
                                 self.exec();
-                                match &mut self.window {
-                                    Some(w) => {
+                                    if let Some(w) = &mut self.window  {
                                         if w.is_open() && !w.is_key_down(Key::Escape) {
                                             let mut arr_ref: Vec<u32> = vec![0; FRAME_BUFFER_HEIGHT*FRAME_BUFFER_WIDTH];
                                             let bufferr: [u32; FRAME_BUFFER_HEIGHT*FRAME_BUFFER_WIDTH] = unsafe {transmute(self.frame_buffer)};
@@ -127,13 +126,12 @@ impl Chip8Interpreter<'_> {
                                             w.update_with_buffer(&arr_ref, FRAME_BUFFER_WIDTH, FRAME_BUFFER_HEIGHT).unwrap();
                                 }
                             }
-                            None => {}
                         }
                     }
                 }
             }
         }
-    }
+    
 
     fn exec(&mut self) {
         let opcode = self.fetch();
