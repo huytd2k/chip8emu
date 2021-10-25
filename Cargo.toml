@@ -8,3 +8,4 @@ edition = "2018"
 [dependencies]
 crossbeam-channel = "0.5"
 minifb = "0.19.3"
+rand = "0.8.4"

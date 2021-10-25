@@ -2,12 +2,12 @@ mod instruction;
 
 extern crate crossbeam_channel;
 
-use minifb::{Window, WindowOptions, Key};
 use crate::chip8::instruction::Instruction;
 use crossbeam_channel::{select, tick};
-use std::time::Duration;
+use minifb::{Key, Window};
+use rand::prelude::*;
 use std::mem::transmute;
-
+use std::time::Duration;
 // Declare specification in constant
 const MEMORY_SIZE: u16 = 4096;
 // In Chip-8, the memory from address 0x00 -> 0x199 is preserved
@@ -34,7 +34,7 @@ const FONTS_DATA: [u8; 80] = [
 ];
 const INSTRUCTIONS_PER_SECOND: f64 = 700.;
 
-pub struct Chip8Interpreter {
+pub struct Chip8Interpreter<'a> {
     registers_v: [u8; 16],
     register_i: u16,
     delay_timer: u16,
@@ -44,6 +44,7 @@ pub struct Chip8Interpreter {
     frame_buffer: [[u32; FRAME_BUFFER_WIDTH]; FRAME_BUFFER_HEIGHT],
     stack: Vec<u16>,
     old_shift: bool,
+    window: Option<&'a mut Window>,
 }
 
 type Mem = [u8; MEMORY_SIZE as usize];
@@ -57,8 +58,9 @@ fn init_mem() -> Mem {
     mem
 }
 
-impl Chip8Interpreter {
-    pub fn new() -> Chip8Interpreter {
+impl Chip8Interpreter<'_> {
+    /// Pass None to run in headless mode
+    pub fn new(window: Option<&mut Window>) -> Chip8Interpreter {
         Chip8Interpreter {
             registers_v: [0; 16],
             register_i: 0,
@@ -69,6 +71,7 @@ impl Chip8Interpreter {
             stack: vec![],
             mem: init_mem(),
             old_shift: false,
+            window,
         }
     }
 
@@ -84,21 +87,15 @@ impl Chip8Interpreter {
         for (idx, &byte) in file.iter().enumerate() {
             self.mem[0x200 + idx] = byte;
         }
+        match &mut self.window {
+            Some(w) => w.limit_update_rate(Some(std::time::Duration::from_micros(16600))),
+            _ => {}
+        }
     }
 
     pub fn run_rom(&mut self, path: &str) {
         // Timer is 60 tick per second
-        let mut window = Window::new(
-            "Test - ESC to exit",
-            FRAME_BUFFER_WIDTH*10,
-            FRAME_BUFFER_HEIGHT*10,
-            WindowOptions::default(),
-        )
-        .unwrap_or_else(|e| {
-            panic!("{}", e);
-        });
         // Limit to max ~60 fps update rate
-        window.limit_update_rate(Some(std::time::Duration::from_micros(16600)));
         let timer_ticker = tick(Duration::from_millis(((1.0 / 60.0) * 1000.) as u64));
         let cpu_timer = tick(Duration::from_millis(
             ((1.0 / INSTRUCTIONS_PER_SECOND) * 1000.) as u64,
@@ -106,26 +103,31 @@ impl Chip8Interpreter {
         self.load_rom(path);
         loop {
             select! {
-                recv(timer_ticker) -> _ => {
-                    if self.delay_timer != 0 {
-                        self.delay_timer -= 1;
-                    }
-                    if self.sound_timer != 0 {
-                        self.sound_timer -= 1;
-                    }
-                }
-                recv(cpu_timer) -> _ => {
-                    if self.delay_timer == 0 {
-                        self.exec();
-                        if window.is_open() && !window.is_key_down(Key::Escape) {
-                            let mut arr_ref: Vec<u32> = vec![0; FRAME_BUFFER_HEIGHT*FRAME_BUFFER_WIDTH];
-                            let bufferr: [u32; FRAME_BUFFER_HEIGHT*FRAME_BUFFER_WIDTH] = unsafe {transmute(self.frame_buffer)};
-                            for (idx, a) in arr_ref.iter_mut().enumerate() {
-                                if bufferr[idx] == 1 {
-                                    *a = 0xFFFFFF;
+                        recv(timer_ticker) -> _ => {
+                            if self.delay_timer != 0 {
+                                self.delay_timer -= 1;
+                            }
+                            if self.sound_timer != 0 {
+                                self.sound_timer -= 1;
+                            }
+                        }
+                        recv(cpu_timer) -> _ => {
+                            if self.delay_timer == 0 {
+                                self.exec();
+                                match &mut self.window {
+                                    Some(w) => {
+                                        if w.is_open() && !w.is_key_down(Key::Escape) {
+                                            let mut arr_ref: Vec<u32> = vec![0; FRAME_BUFFER_HEIGHT*FRAME_BUFFER_WIDTH];
+                                            let bufferr: [u32; FRAME_BUFFER_HEIGHT*FRAME_BUFFER_WIDTH] = unsafe {transmute(self.frame_buffer)};
+                                            for (idx, a) in arr_ref.iter_mut().enumerate() {
+                                                if bufferr[idx] == 1 {
+                                                    *a = 0xFFFFFF;
+                                                }
+                                            }
+                                            w.update_with_buffer(&arr_ref, FRAME_BUFFER_WIDTH, FRAME_BUFFER_HEIGHT).unwrap();
                                 }
                             }
-                            window.update_with_buffer(&arr_ref, FRAME_BUFFER_WIDTH, FRAME_BUFFER_HEIGHT).unwrap();
+                            None => {}
                         }
                     }
                 }
@@ -256,6 +258,12 @@ impl Chip8Interpreter {
             Instruction::IANNN(opcode) => {
                 self.register_i = opcode.nnn;
             }
+            Instruction::IBNNN(opcode) => {
+                self.register_pc = opcode.nnn + self.registers_v[0] as u16;
+            }
+            Instruction::ICXNN(opcode) => {
+                self.registers_v[opcode.x as usize] = random::<u8>() & opcode.kk
+            }
             Instruction::IDXYN(opcode) => {
                 let x_cor = self.registers_v[opcode.x as usize] & 63;
                 let y_cor = self.registers_v[opcode.y as usize] & 31;
@@ -340,7 +348,7 @@ mod tests {
     use super::*;
     #[test]
     fn test_cpu_fetch() {
-        let mut cpu = Chip8Interpreter::new();
+        let mut cpu = Chip8Interpreter::new(None);
         cpu.mem[0x200] = 0xAB;
         cpu.mem[0x201] = 0xBC;
         assert_eq!(cpu.fetch(), 0xABBC);
@@ -349,14 +357,14 @@ mod tests {
 
     #[test]
     fn test_cpu_load() {
-        let mut cpu = Chip8Interpreter::new();
+        let mut cpu = Chip8Interpreter::new(None);
         cpu.load_rom("tests/resource/0xABBC.txt");
         assert_eq!(cpu.fetch(), 0xABBC);
     }
 
     #[test]
     fn test_display() {
-        let mut cpu = Chip8Interpreter::new();
+        let mut cpu = Chip8Interpreter::new(None);
         cpu.mem[0] = 0b11111000;
         cpu.mem[1] = 0;
         cpu.frame_buffer = [[1; FRAME_BUFFER_WIDTH]; FRAME_BUFFER_HEIGHT];
@@ -372,7 +380,7 @@ mod tests {
     #[test]
     #[ignore]
     fn test_bc() {
-        let mut cpu = Chip8Interpreter::new();
+        let mut cpu = Chip8Interpreter::new(None);
         // cpu.delay_timer = 60;
         cpu.run_rom("my_file.txt");
     }
